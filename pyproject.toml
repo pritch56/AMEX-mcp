@@ -1,0 +1,73 @@
+[project]
+name = "uk-bank-mcp-amex"
+version = "0.1.0"
+description = "Unofficial read-only MCP server for American Express UK card data (TrueLayer Open Banking or statement-file import)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "pritch56" }]
+keywords = ["mcp", "model-context-protocol", "american-express", "amex", "open-banking", "truelayer", "ofx", "personal-finance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
+]
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.27",
+    "anyio>=4",
+    "uvicorn>=0.30",
+    "tzdata>=2024.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/pritch56/uk-bank-mcp"
+Repository = "https://github.com/pritch56/uk-bank-mcp"
+Issues = "https://github.com/pritch56/uk-bank-mcp/issues"
+Changelog = "https://github.com/pritch56/uk-bank-mcp/blob/main/amex/CHANGELOG.md"
+
+[project.scripts]
+amex-mcp = "amex_mcp.server:main"
+amex-mcp-link = "amex_mcp.link:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amex_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --basetemp=.pytest_tmp -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = [
+    "S101",   # assert is fine (tests, and narrowing)
+    "RUF012", # mutable class attributes in test doubles
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B017"]
