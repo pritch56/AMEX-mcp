@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# Test, lint and type-check caches
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets and personal data: never commit these
+.env
+.env.*
+!.env.example
+tokens.json
+.amex-mcp/
+statements/
+
+# Local databases and tool state
+*.db
+ruvector.db
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
