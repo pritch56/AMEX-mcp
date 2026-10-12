@@ -1,7 +1,18 @@
 # amex-mcp
 
-An **unofficial**, **read-only** [Model Context Protocol](https://modelcontextprotocol.io) server for
-American Express UK card data: cards, balance, transactions and consent status.
+Ask Claude (or any MCP client) about your own American Express UK card. An **unofficial**,
+**read-only** [Model Context Protocol](https://modelcontextprotocol.io) server for American Express
+UK card data: cards, balance, transactions and consent status.
+
+[![CI](https://github.com/pritch56/AMEX-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/pritch56/AMEX-mcp/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
+
+> **Status: alpha, never run against the live API.** Everything here has been tested only against
+> mocked HTTP, a local fake TrueLayer server and synthetic statement files. It has not been run
+> against TrueLayer (sandbox or live) or against real American Express data. The specific things
+> that are assumed rather than verified are listed under
+> [Unverified assumptions](#unverified-assumptions), with what each one affects.
 
 - Two data sources behind one interface:
   1. **TrueLayer Data API** (UK Open Banking through a regulated aggregator) - automatic.
@@ -10,51 +21,22 @@ American Express UK card data: cards, balance, transactions and consent status.
 - No tool can move money or change the account. There is no screen scraping, and the server never
   sees your Amex username or password.
 
-> **Status: alpha, never run against the live API.** Everything here has been tested only against
-> mocked HTTP, a local fake TrueLayer server and synthetic statement files. It has not been run
-> against TrueLayer (sandbox or live) or against real American Express data. Specific things that are
-> assumed rather than verified:
->
-> - whether TrueLayer rotates refresh tokens on refresh (the server copes with both);
-> - the sign of the card balance field `current` (assumed positive = money owed) and the meaning of
->   `available` (assumed available credit);
-> - whether TrueLayer's `account_id` for a card changes when the card is re-linked;
-> - whether pending transactions have stable ids (assumed not);
-> - whether a transaction's `timestamp` is the purchase date or the posting date;
-> - the effect of not sending the `X-PSU-IP` header (the server never sends it, so every request
->   counts as unattended and the bank's unattended rate limits apply);
-> - whether an individual can get Live access to the TrueLayer Data API, and at what price;
-> - the `providers` value used in the consent link (`uk-ob-all uk-oauth-all`);
-> - the `code_challenge` / `code_challenge_method` parameter names on the consent link (PKCE);
-> - whether `from` / `to` on the transactions endpoint are inclusive calendar days;
-> - the exact column headers of today's Amex UK CSV export.
->
-> See [Unverified assumptions](#unverified-assumptions) for what each one affects.
+Not affiliated with, endorsed by, or supported by American Express or TrueLayer. For your own
+accounts only. Read the [Disclaimer](#disclaimer) and [Security](#security) sections before you
+point it at real data.
 
-## Disclaimer
+<details>
+<summary>Contents</summary>
 
-This project is **not affiliated with, endorsed by, or supported by American Express or TrueLayer**.
-"American Express", "Amex" and "TrueLayer" are trademarks of their respective owners and are used
-here only to describe what the software talks to.
-
-- The software is provided **as is, without warranty of any kind**. Check its output before you rely
-  on it.
-- You must **register your own TrueLayer API client** and comply with TrueLayer's terms and with
-  your card agreement. Whether TrueLayer offers Live access to individuals is **unconfirmed**: read
-  the TrueLayer Console terms yourself before relying on this route.
-- It is for **your own accounts only**. Do not host it for other people or connect accounts that are
-  not yours.
-- Nothing it returns is financial advice.
-
-## Contents
-
-- [How it works](#how-it-works)
+- [What you can ask](#what-you-can-ask)
 - [Quick start](#quick-start)
+- [MCP client configuration](#mcp-client-configuration)
+- [Tools](#tools)
+- [Disclaimer](#disclaimer)
+- [How it works](#how-it-works)
 - [Route 1: TrueLayer](#route-1-truelayer)
 - [Route 2: statement files](#route-2-statement-files)
 - [Running the server](#running-the-server)
-- [MCP client configuration](#mcp-client-configuration)
-- [Tools](#tools)
 - [Pending transactions: always fetch overlapping windows](#pending-transactions-always-fetch-overlapping-windows)
 - [Errors](#errors)
 - [Configuration](#configuration)
@@ -65,29 +47,81 @@ here only to describe what the software talks to.
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
-## How it works
+</details>
 
-American Express has no API for individual cardholders. Card data is reachable either through a
-regulated Open Banking aggregator, or by exporting statement files from the Amex website. This server
-supports one of each; `docs/research.md` has dated notes on the alternatives that were looked at.
+## What you can ask
 
-| | TrueLayer route | Statement-file route |
-|---|---|---|
-| Setup | TrueLayer Console account, an application, a one-off consent | none |
-| Ongoing effort | re-consent about every 90 days | export a file whenever you want fresh data |
-| Balance | yes | only from OFX/QFX exports |
-| Pending transactions | if the bank offers them | no |
-| Third party involved | TrueLayer | none |
+Once the server is connected to an MCP client such as Claude Desktop or Claude Code, you ask in
+plain English and the client calls the read-only tools. The server returns normalised data; the
+sums, grouping and wording are done by the model, so check anything you intend to rely on.
+
+- "What did I spend on my Amex between 1 and 30 September, grouped by category?"
+  (`list_transactions`; categories are Amex's own, where the source provides them)
+- "List every foreign-currency charge last month, with the original amount and exchange rate."
+  (`list_transactions`; the details are in each transaction's `notes` when the source has them)
+- "Did the refund from the outdoor shop arrive? Show refunds and payments to the card this month."
+  (`list_transactions`; a positive `amount_minor` is a refund or a payment to the card)
+- "What is my current balance, and when is the next payment due?"
+  (`get_balance`; the TrueLayer route has both, an OFX/QFX export has the balance only, CSV neither)
+- "Is my Amex connection healthy, and when does the consent run out?"
+  (`get_connection_status`)
+- "Here is the text of a CSV export - turn it into clean transactions."
+  (`parse_statement`; nothing is stored and no network call is made)
 
 ## Quick start
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+About a minute, using the statement-file route: no sign-up, no API keys and no third party. You need
+[uv](https://docs.astral.sh/uv/); it fetches a suitable Python (3.11+) if you do not have one.
+
+**1. Put a statement export in a folder.** Either sign in to the Amex UK website yourself, open
+*Statements & Activity* and download the activity as **CSV**, or try it first with the synthetic
+sample file from this repository (invented merchants and amounts, not a real statement).
 
 PowerShell:
 
 ```powershell
-git clone https://github.com/pritch56/uk-bank-mcp.git
-cd uk-bank-mcp/amex
+mkdir amex-statements
+Invoke-WebRequest -OutFile amex-statements\sample.csv https://raw.githubusercontent.com/pritch56/AMEX-mcp/main/tests/fixtures/amex_uk_activity.csv
+```
+
+bash:
+
+```bash
+mkdir amex-statements
+curl -o amex-statements/sample.csv https://raw.githubusercontent.com/pritch56/AMEX-mcp/main/tests/fixtures/amex_uk_activity.csv
+```
+
+**2. Add the server to your MCP client**, pointing `AMEX_IMPORT_DIR` at the full path of that folder.
+For Claude Code:
+
+```bash
+claude mcp add amex -e AMEX_IMPORT_DIR=/full/path/to/amex-statements -- uvx --from git+https://github.com/pritch56/AMEX-mcp amex-mcp
+```
+
+For Claude Desktop and other clients, paste the block from
+[MCP client configuration](#mcp-client-configuration) and restart the client.
+
+**3. Ask.** For example: "Check my Amex connection, then list my transactions between 2026-09-01 and
+2026-10-31 grouped by category." (The sample file covers September and October 2026; with no dates
+given, `list_transactions` returns the last 30 days.)
+
+`uvx --from git+...` installs straight from this repository's default branch and runs the server over
+stdio. To pin what you run, append a commit to the URL: `git+https://github.com/pritch56/AMEX-mcp@<commit>`. There is no PyPI
+package.
+
+For automatic updates through Open Banking instead of exported files, see
+[Route 1: TrueLayer](#route-1-truelayer); note the caveats in the status banner first.
+
+### From a clone
+
+For development, to run the tests, or to use the HTTP transport. Requires Python 3.11+ and
+[uv](https://docs.astral.sh/uv/).
+
+PowerShell:
+
+```powershell
+git clone https://github.com/pritch56/AMEX-mcp.git
+cd AMEX-mcp
 uv sync
 uv run pytest
 ```
@@ -95,15 +129,16 @@ uv run pytest
 bash:
 
 ```bash
-git clone https://github.com/pritch56/uk-bank-mcp.git
-cd uk-bank-mcp/amex
+git clone https://github.com/pritch56/AMEX-mcp.git
+cd AMEX-mcp
 uv sync
 uv run pytest
 ```
 
 The tests need no network access and no credentials.
 
-The quickest way to see it work is the statement-file route with the bundled synthetic fixture.
+To see the HTTP transport work from the clone, use the statement-file route with the bundled
+synthetic fixtures.
 
 PowerShell:
 
@@ -120,6 +155,10 @@ uv run amex-mcp --transport http --port 8000
 ```
 
 The server is then at `http://127.0.0.1:8000/mcp`. For real use, pick a route below.
+
+That fixtures folder deliberately holds a CSV and a QFX export of the same dates, so the same
+purchases show up more than once there (see the note about mixing formats under
+[Route 2](#route-2-statement-files)). For a clean demo, copy one file into a folder of its own.
 
 Without uv, a plain virtual environment works too.
 
@@ -138,6 +177,187 @@ python -m venv .venv
 .venv/bin/pip install -e .
 .venv/bin/python -m amex_mcp --help
 ```
+
+## MCP client configuration
+
+### Statement-file route (copy and paste)
+
+The same block works in **Claude Code** (`.mcp.json` in your project) and **Claude Desktop**
+(`claude_desktop_config.json`). Change the path to the folder that holds your exports. On Windows,
+forward slashes work (`C:/path/to/amex-statements`); backslashes must be doubled in JSON.
+
+```json
+{
+  "mcpServers": {
+    "amex": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/pritch56/AMEX-mcp", "amex-mcp"],
+      "env": {
+        "AMEX_IMPORT_DIR": "/full/path/to/amex-statements"
+      }
+    }
+  }
+}
+```
+
+Running from a clone instead: use `"command": "uv"` with
+`"args": ["run", "--directory", "/path/to/AMEX-mcp", "amex-mcp"]`.
+
+### TrueLayer route
+
+Both TrueLayer examples take secrets from your environment through `${VAR}` placeholders. Do not paste secrets
+into these files. They run the
+server from a clone: replace `/path/to/AMEX-mcp` with the folder you cloned into.
+
+**Claude Code** (`.mcp.json` in your project, or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "amex": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/AMEX-mcp", "amex-mcp"],
+      "env": {
+        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
+        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop** (`claude_desktop_config.json`): the same block works. Claude Desktop passes the
+variables of the environment it was started from; if `${VAR}` expansion is not available in your
+version, start Claude Desktop from a shell that has the variables set and omit the `env` block
+rather than writing the secret into the file.
+
+```json
+{
+  "mcpServers": {
+    "amex": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/AMEX-mcp", "amex-mcp"],
+      "env": {
+        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
+        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
+      }
+    }
+  }
+}
+```
+
+For the statement-file route, replace the `env` block with
+`"env": { "AMEX_IMPORT_DIR": "/path/to/statements" }`.
+
+A remote client uses the URL `https://<your-host>/mcp` with the header
+`Authorization: Bearer ${AMEX_MCP_AUTH_TOKEN}`.
+
+## Tools
+
+All tools are read-only.
+
+| Tool | Returns |
+|---|---|
+| `get_connection_status()` | `{connected, consent_expires_at, days_remaining, warning, ...}`. Never fails for provider, authentication, configuration or rate-limit problems: it returns `connected: false` with the bracketed error in `warning`. Call it first. |
+| `list_accounts()` | `{accounts: [{id, account_id, name, type, card_network, last4, currency, provider, source}]}`. `account_id` duplicates `id`. |
+| `get_balance(account_id)` | `{balance_minor, currency, available_credit_minor, credit_limit_minor, last_statement_balance_minor, last_statement_date, payment_due_minor, payment_due_date, as_of, notes}` |
+| `list_transactions(account_id, since?, before?, include_pending=false)` | `{since, before, count, pending_supported, pending_excluded, earliest_pending_date, transactions: [...]}` |
+| `parse_statement(content, filename?, account_id?)` | Normalises the text of a CSV/OFX/QFX export. Stores nothing and makes no network call. |
+
+### `get_connection_status`
+
+| Field | Meaning |
+|---|---|
+| `connected` | `true` when the data source can be used right now (`false` once the consent has expired) |
+| `consent_expires_at` | ISO 8601 UTC timestamp ending in `Z`, or `null` (always `null` for statement files) |
+| `days_remaining` | whole days until the consent expires, or `null` |
+| `warning` | `null`, or a message when action is needed: under 14 days of consent left, consent expired, not linked, misconfigured, rate limited, statement files stale, or refreshed tokens that could not be saved |
+
+Extra fields (`provider`, `message`, `needs_reauthorisation`, `error`, `checked_at`, and
+provider-specific ones) are informational.
+
+### `get_balance`
+
+`balance_minor` is a signed integer in minor units (pence). **Negative means money is owed on the
+card.** `currency` is the ISO 4217 code. Fields the source does not have are `null`; CSV exports
+have no balance at all.
+
+### `list_transactions`
+
+- The window is `since <= date < before`. Both are `YYYY-MM-DD` calendar dates in
+  **Europe/London**. A full ISO 8601 datetime is accepted and converted to its London date.
+- Defaults: `before` = tomorrow (London), `since` = `before` minus 30 days.
+- `since >= before` is rejected with `[invalid_request]`.
+- A range longer than `AMEX_MAX_RANGE_DAYS` (default 400) is rejected with `[invalid_request]`
+  before any request is sent.
+- The effective `since` and `before` are echoed back as `YYYY-MM-DD`.
+
+Each transaction:
+
+```json
+{
+  "id": "amex_b26b957a4d9f688558359cb6",
+  "source": "amex",
+  "account_id": "f7b0...",
+  "date": "2026-10-04",
+  "amount_minor": -4321,
+  "currency": "GBP",
+  "description": "EXAMPLE DINER NEW YORK",
+  "merchant": null,
+  "category": "Entertainment-Restaurants",
+  "pending": false,
+  "notes": "foreign_amount=54.00 US DOLLARS; fx_rate=1.2871; fx_commission=1.25"
+}
+```
+
+- **Sign:** `amount_minor` is signed minor units. **Negative = a card charge (money out). Positive =
+  a refund or a payment to the card.**
+- **`date`** is `YYYY-MM-DD` in Europe/London. A provider timestamp that carries a UTC offset is
+  converted to London time first.
+- **`notes`** is `null` when there is nothing to say, never an empty string. Foreign-currency
+  details, when the source provides them, go here; the amount itself is the billed amount.
+- **Ids are stable across calls for booked transactions.**
+  - TrueLayer: a hash of `normalised_provider_transaction_id` (or `provider_transaction_id`). The
+    id does not depend on TrueLayer's `account_id`. TrueLayer's own `transaction_id` is ignored
+    because it is documented as changing between requests.
+  - CSV: a hash of Amex's `Reference`. OFX/QFX: a hash of `FITID`.
+  - When the source has no id (and for all pending items), the id is a hash of account, date,
+    amount, currency, description and an occurrence number, so two identical purchases on one day
+    stay distinct.
+  - If two rows share a provider id but differ in date, amount or description, **both are kept**:
+    the later one gets an id derived from its content, and a warning is logged. The same applies
+    when a second card on the same consent reuses a provider id for a different transaction (in
+    that case which card keeps the plain id depends on which card was fetched first in the running
+    process).
+
+## Disclaimer
+
+This project is **not affiliated with, endorsed by, or supported by American Express or TrueLayer**.
+"American Express", "Amex" and "TrueLayer" are trademarks of their respective owners and are used
+here only to describe what the software talks to.
+
+- The software is provided **as is, without warranty of any kind**. Check its output before you rely
+  on it.
+- You must **register your own TrueLayer API client** and comply with TrueLayer's terms and with
+  your card agreement. Whether TrueLayer offers Live access to individuals is **unconfirmed**: read
+  the TrueLayer Console terms yourself before relying on this route.
+- It is for **your own accounts only**. Do not host it for other people or connect accounts that are
+  not yours.
+- Nothing it returns is financial advice.
+
+## How it works
+
+American Express has no API for individual cardholders. Card data is reachable either through a
+regulated Open Banking aggregator, or by exporting statement files from the Amex website. This server
+supports one of each; `docs/research.md` has dated notes on the alternatives that were looked at.
+
+| | TrueLayer route | Statement-file route |
+|---|---|---|
+| Setup | TrueLayer Console account, an application, a one-off consent | none |
+| Ongoing effort | re-consent about every 90 days | export a file whenever you want fresh data |
+| Balance | yes | only from OFX/QFX exports |
+| Pending transactions | if the bank offers them | no |
+| Third party involved | TrueLayer | none |
 
 ## Route 1: TrueLayer
 
@@ -295,132 +515,6 @@ uv run amex-mcp --transport http --host 0.0.0.0 --port 8000
 `python -m amex_mcp` is equivalent to the `amex-mcp` command. The HTTP transport is stateless and
 answers with JSON. It speaks **plain HTTP**: put it behind something that terminates TLS (see
 [Security](#security)). HTTP clients send `Authorization: Bearer <AMEX_MCP_AUTH_TOKEN>`.
-
-## MCP client configuration
-
-Both examples take secrets from your environment through `${VAR}` placeholders. Do not paste secrets
-into these files. Replace `/path/to/uk-bank-mcp/amex` with the folder you cloned into.
-
-**Claude Code** (`.mcp.json` in your project, or `claude mcp add`):
-
-```json
-{
-  "mcpServers": {
-    "amex": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/uk-bank-mcp/amex", "amex-mcp"],
-      "env": {
-        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
-        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
-      }
-    }
-  }
-}
-```
-
-**Claude Desktop** (`claude_desktop_config.json`): the same block works. Claude Desktop passes the
-variables of the environment it was started from; if `${VAR}` expansion is not available in your
-version, start Claude Desktop from a shell that has the variables set and omit the `env` block
-rather than writing the secret into the file.
-
-```json
-{
-  "mcpServers": {
-    "amex": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/uk-bank-mcp/amex", "amex-mcp"],
-      "env": {
-        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
-        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
-      }
-    }
-  }
-}
-```
-
-For the statement-file route, replace the `env` block with
-`"env": { "AMEX_IMPORT_DIR": "/path/to/statements" }`.
-
-A remote client uses the URL `https://<your-host>/mcp` with the header
-`Authorization: Bearer ${AMEX_MCP_AUTH_TOKEN}`.
-
-## Tools
-
-All tools are read-only.
-
-| Tool | Returns |
-|---|---|
-| `get_connection_status()` | `{connected, consent_expires_at, days_remaining, warning, ...}`. Never fails for provider, authentication, configuration or rate-limit problems: it returns `connected: false` with the bracketed error in `warning`. Call it first. |
-| `list_accounts()` | `{accounts: [{id, account_id, name, type, card_network, last4, currency, provider, source}]}`. `account_id` duplicates `id`. |
-| `get_balance(account_id)` | `{balance_minor, currency, available_credit_minor, credit_limit_minor, last_statement_balance_minor, last_statement_date, payment_due_minor, payment_due_date, as_of, notes}` |
-| `list_transactions(account_id, since?, before?, include_pending=false)` | `{since, before, count, pending_supported, pending_excluded, earliest_pending_date, transactions: [...]}` |
-| `parse_statement(content, filename?, account_id?)` | Normalises the text of a CSV/OFX/QFX export. Stores nothing and makes no network call. |
-
-### `get_connection_status`
-
-| Field | Meaning |
-|---|---|
-| `connected` | `true` when the data source can be used right now (`false` once the consent has expired) |
-| `consent_expires_at` | ISO 8601 UTC timestamp ending in `Z`, or `null` (always `null` for statement files) |
-| `days_remaining` | whole days until the consent expires, or `null` |
-| `warning` | `null`, or a message when action is needed: under 14 days of consent left, consent expired, not linked, misconfigured, rate limited, statement files stale, or refreshed tokens that could not be saved |
-
-Extra fields (`provider`, `message`, `needs_reauthorisation`, `error`, `checked_at`, and
-provider-specific ones) are informational.
-
-### `get_balance`
-
-`balance_minor` is a signed integer in minor units (pence). **Negative means money is owed on the
-card.** `currency` is the ISO 4217 code. Fields the source does not have are `null`; CSV exports
-have no balance at all.
-
-### `list_transactions`
-
-- The window is `since <= date < before`. Both are `YYYY-MM-DD` calendar dates in
-  **Europe/London**. A full ISO 8601 datetime is accepted and converted to its London date.
-- Defaults: `before` = tomorrow (London), `since` = `before` minus 30 days.
-- `since >= before` is rejected with `[invalid_request]`.
-- A range longer than `AMEX_MAX_RANGE_DAYS` (default 400) is rejected with `[invalid_request]`
-  before any request is sent.
-- The effective `since` and `before` are echoed back as `YYYY-MM-DD`.
-
-Each transaction:
-
-```json
-{
-  "id": "amex_b26b957a4d9f688558359cb6",
-  "source": "amex",
-  "account_id": "f7b0...",
-  "date": "2026-10-04",
-  "amount_minor": -4321,
-  "currency": "GBP",
-  "description": "EXAMPLE DINER NEW YORK",
-  "merchant": null,
-  "category": "Entertainment-Restaurants",
-  "pending": false,
-  "notes": "foreign_amount=54.00 US DOLLARS; fx_rate=1.2871; fx_commission=1.25"
-}
-```
-
-- **Sign:** `amount_minor` is signed minor units. **Negative = a card charge (money out). Positive =
-  a refund or a payment to the card.**
-- **`date`** is `YYYY-MM-DD` in Europe/London. A provider timestamp that carries a UTC offset is
-  converted to London time first.
-- **`notes`** is `null` when there is nothing to say, never an empty string. Foreign-currency
-  details, when the source provides them, go here; the amount itself is the billed amount.
-- **Ids are stable across calls for booked transactions.**
-  - TrueLayer: a hash of `normalised_provider_transaction_id` (or `provider_transaction_id`). The
-    id does not depend on TrueLayer's `account_id`. TrueLayer's own `transaction_id` is ignored
-    because it is documented as changing between requests.
-  - CSV: a hash of Amex's `Reference`. OFX/QFX: a hash of `FITID`.
-  - When the source has no id (and for all pending items), the id is a hash of account, date,
-    amount, currency, description and an occurrence number, so two identical purchases on one day
-    stay distinct.
-  - If two rows share a provider id but differ in date, amount or description, **both are kept**:
-    the later one gets an id derived from its content, and a warning is logged. The same applies
-    when a second card on the same consent reuses a provider id for a different transaction (in
-    that case which card keeps the plain id depends on which card was fetched first in the running
-    process).
 
 ## Pending transactions: always fetch overlapping windows
 
@@ -614,6 +708,24 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 None of these could be checked without real credentials. If you run this against the live API,
 these are the first things to check.
+
+Specific things that are assumed rather than verified:
+
+- whether TrueLayer rotates refresh tokens on refresh (the server copes with both);
+- the sign of the card balance field `current` (assumed positive = money owed) and the meaning of
+  `available` (assumed available credit);
+- whether TrueLayer's `account_id` for a card changes when the card is re-linked;
+- whether pending transactions have stable ids (assumed not);
+- whether a transaction's `timestamp` is the purchase date or the posting date;
+- the effect of not sending the `X-PSU-IP` header (the server never sends it, so every request
+  counts as unattended and the bank's unattended rate limits apply);
+- whether an individual can get Live access to the TrueLayer Data API, and at what price;
+- the `providers` value used in the consent link (`uk-ob-all uk-oauth-all`);
+- the `code_challenge` / `code_challenge_method` parameter names on the consent link (PKCE);
+- whether `from` / `to` on the transactions endpoint are inclusive calendar days;
+- the exact column headers of today's Amex UK CSV export.
+
+What each assumption affects:
 
 | Assumption | If it is wrong |
 |---|---|
