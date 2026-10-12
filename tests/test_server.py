@@ -150,7 +150,7 @@ def test_server_info_version_is_the_package_version():
             return client.server_info
 
     info = run(go())
-    assert info.name == "amex" and info.version == version("uk-bank-mcp-amex")
+    assert info.name == "amex" and info.version == version("amex-mcp")
 
 
 def test_list_transactions_tool_shape_and_defaults():
@@ -587,7 +587,7 @@ def test_e2e_streamable_http_against_stub_truelayer_with_bearer_auth(tmp_path, f
         auth = {**headers, "Authorization": "bearer e2e-bearer-token"}
         r = httpx.post(url, json=init, headers=auth)
         info = r.json()["result"]["serverInfo"]
-        assert r.status_code == 200 and info["name"] == "amex" and info["version"] == version("uk-bank-mcp-amex")
+        assert r.status_code == 200 and info["name"] == "amex" and info["version"] == version("amex-mcp")
         proto = {"MCP-Protocol-Version": r.json()["result"]["protocolVersion"]}
         r = httpx.post(url, headers={**auth, **proto}, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         assert {t["name"] for t in r.json()["result"]["tools"]} == EXPECTED_TOOLS

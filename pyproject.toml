@@ -1,5 +1,5 @@
 [project]
-name = "uk-bank-mcp-amex"
+name = "amex-mcp"
 version = "0.1.0"
 description = "Unofficial read-only MCP server for American Express UK card data (TrueLayer Open Banking or statement-file import)"
 readme = "README.md"

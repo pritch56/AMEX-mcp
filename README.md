@@ -8,10 +8,10 @@ UK card data: cards, balance, transactions and consent status.
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
-> **Status: alpha, never run against the live API.** Everything here has been tested only against
-> mocked HTTP, a local fake TrueLayer server and synthetic statement files. It has not been run
-> against TrueLayer (sandbox or live) or against real American Express data. The specific things
-> that are assumed rather than verified are listed under
+> **Status: alpha.** The author runs it against their own live American Express UK card through
+> TrueLayer for a weekly read-only sync, and it has had no wider use. The automated tests use only
+> mocked HTTP, a local fake TrueLayer server and synthetic statement files. The specific things
+> that are assumed rather than confirmed one by one are listed under
 > [Unverified assumptions](#unverified-assumptions), with what each one affects.
 
 - Two data sources behind one interface:

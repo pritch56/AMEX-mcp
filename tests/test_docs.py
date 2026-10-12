@@ -87,7 +87,7 @@ def test_contract_notes_are_documented():
     ):
         assert needle.lower() in README.lower(), needle
     assert README.splitlines()[0] == "# amex-mcp" and "unofficial" in README[:300].lower()
-    assert "Status:" in README[:1200] and "never run against the live API" in README[:1200]
+    assert "Status:" in README[:1200] and "alpha" in README[:1200]
 
 
 def test_no_inline_secrets_machine_paths_or_private_setup_in_the_docs():

@@ -4,10 +4,10 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-10-12
 
-First public version. Tested only against mocks, a local fake TrueLayer server and synthetic
-statement files; never run against the live API.
+First public version. The automated tests use mocks, a local fake TrueLayer server and synthetic
+statement files; the author also runs it against their own live card through TrueLayer.
 
 ### Added
 
