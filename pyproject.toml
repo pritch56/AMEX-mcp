@@ -30,10 +30,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pritch56/uk-bank-mcp"
-Repository = "https://github.com/pritch56/uk-bank-mcp"
-Issues = "https://github.com/pritch56/uk-bank-mcp/issues"
-Changelog = "https://github.com/pritch56/uk-bank-mcp/blob/main/amex/CHANGELOG.md"
+Homepage = "https://github.com/pritch56/AMEX-mcp"
+Repository = "https://github.com/pritch56/AMEX-mcp"
+Issues = "https://github.com/pritch56/AMEX-mcp/issues"
+Changelog = "https://github.com/pritch56/AMEX-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 amex-mcp = "amex_mcp.server:main"
